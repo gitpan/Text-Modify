@@ -1,0 +1,9 @@
+Text-Modify	v0.2	(2005-02-25, +rl)
+- completed navigation, set/get, replace functions of Text-Buffer
+- nearly completed tests for Text::Buffer (search/find missing)
+- rewrote tests for Text::Modify
+- Text::Modify::Rule now uses Text::Buffer for easy editing
+- all tests succeeded
+
+Text-Modify	v0.1	(2005-01-27, +rl)
+- initial upload to public repository (http://brabbel.net/svn/cpan/Text-Modify/)

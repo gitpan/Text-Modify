@@ -1,0 +1,14 @@
+MANIFEST
+Makefile.PL
+lib/Text/Buffer.pm
+lib/Text/Modify.pm
+lib/Text/Modify/Rule.pm
+t/01-compile.t
+t/02-buffer.t
+t/03-modify.t
+t/03-modify.in
+t/03-modify.out
+README
+CHANGES
+LICENSE
+META.yml                                 Module meta-data (added by MakeMaker)
