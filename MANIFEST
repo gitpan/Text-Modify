@@ -1,5 +1,6 @@
 MANIFEST
 Makefile.PL
+Build.PL
 lib/Text/Buffer.pm
 lib/Text/Modify.pm
 lib/Text/Modify/Rule.pm
@@ -8,6 +9,7 @@ t/02-buffer.t
 t/03-modify.t
 t/03-modify.in
 t/03-modify.out
+t/99-pod.t
 README
 CHANGES
 LICENSE

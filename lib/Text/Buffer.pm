@@ -5,7 +5,9 @@ use vars qw($VERSION);
 
 use Carp;
 
-$VERSION = '0.2';
+BEGIN {
+	$VERSION = '0.3';
+}
 
 sub new {
 	my $proto = shift;
@@ -14,85 +16,98 @@ sub new {
 				 _debug    => 1,
 				 _buffer   => [],
 				 _currline => 0,
+				 _modified => 0
 	};
 
 	bless( $self, $class );
 	$self->_debug("Instantiated new object $class");
 
 	my %opts = @_;
-	if ($opts{file}) {
+	if ( $opts{file} ) {
 		$self->{file} = $opts{file};
 		$self->load();
-	} elsif ($opts{array}) {
-		if (ref($opts{array}) eq "ARRAY") {
-			foreach (@{$opts{array}}) {
+	}
+	elsif ( $opts{array} ) {
+		if ( ref( $opts{array} ) eq "ARRAY" ) {
+			foreach ( @{ $opts{array} } ) {
 				$self->append($_);
 			}
 		}
+		$self->_setModified(1);
 	}
-	
+
 	return $self;
 }
 
 sub load {
 	my $self = shift;
 	my $file = shift || $self->{file};
-	if (!$file) { 
-		$self->setError("No file to load specified");
+	if ( !$file ) {
+		$self->_setError("No file to load specified");
 		return undef;
 	}
 	$self->_debug("Loading file $file");
-	if (open(FIL,$file)) {
+	if ( open( FIL, $file ) ) {
 		$self->_debug("clearing buffer and adding $file to buffer");
 		$self->clear();
-		while(<FIL>) {
+		while (<FIL>) {
 			$self->append($_);
 		}
 		close(FIL);
-		return $self->getLineCount();
-	} else {
-		$self->setError("Failed to load file $file");
+		$self->_clearModified();
+		return 1;
+	}
+	else {
+		$self->_setError("Failed to load file $file");
 		return undef;
 	}
 	return 0;
 }
-	
+
 sub save {
 	my $self = shift;
 	my $file = shift || $self->{file};
-	if (!$file) { 
-		$self->setError("No file to save to specified");
+	if ( !$file ) {
+		$self->_setError("No file to save to specified");
 		return undef;
 	}
-	$self->_debug("Saving " . $self->getLineCount() . " lines to file $file");
 
-	if (open(FIL,">$file")) {
+	if ( !$self->isModified() ) {
+		$self->_debug("Buffer not modified, not saving to file $file");
+		return 1;
+	}
+	else {
+		$self->_debug(
+				   "Saving " . $self->getLineCount() . " lines to file $file" );
+	}
+
+	if ( open( FIL, ">$file" ) ) {
 		$self->_debug("saving buffer to $file");
 		$self->goto('top');
 		my $str = $self->get();
 		my $cnt = 0;
-		while (defined($str)) {
+		while ( defined($str) ) {
 			$cnt++;
 			print FIL $str;
 			$str = $self->next();
 		}
 		close(FIL);
 		return $cnt;
-	} else {
-		$self->setError("Failed to load file $file");
+	}
+	else {
+		$self->_setError("Failed to load file $file");
 		return undef;
 	}
-	
+
 	return 0;
 }
 
 sub clear {
 	my $self = shift;
-	@{$self->{_buffer}} = ();
+	@{ $self->{_buffer} } = ();
 	$self->{_currline} = 0;
 	return 1;
 }
-
 
 #=============================================================
 # Public Methods
@@ -102,11 +117,11 @@ sub clear {
 
 # Internal method returning the resulting array position (starting at 0)
 sub _translateLinePos {
-	my $self = shift;
+	my $self    = shift;
 	my $linenum = shift || return undef;
-	my $curr = $self->{_currline};	# Resulting line to return
+	my $curr    = $self->{_currline};      # Resulting line to return
 	if ( $linenum =~ /^[0-9]+$/ ) {
-		$curr = $linenum-1;
+		$curr = $linenum - 1;
 	}
 	elsif ( $linenum =~ /^[+-]\d+$/ ) {
 		eval "\$curr=$curr$linenum";
@@ -115,7 +130,7 @@ sub _translateLinePos {
 		$curr = 0;
 	}
 	elsif ( $linenum =~ /^(end|bottom|last)$/ ) {
-		$curr = $self->getLineCount()-1;
+		$curr = $self->getLineCount() - 1;
 	}
 	else {
 		$self->_debug("Could not translate: $linenum");
@@ -123,53 +138,63 @@ sub _translateLinePos {
 	}
 
 	# do sanity check now
-	if ($curr < 0 || $curr >= $self->getLineCount()) {
-		$self->_debug("Failed sanity check, current line would be out of bounds");
+	if ( $curr < 0 || $curr >= $self->getLineCount() ) {
+		$self->_debug(
+					"Failed sanity check, current line would be out of bounds");
 		return undef;
-	} 
+	}
 
 	return $curr;
 }
 
-sub goto {    
+sub goto {
 	my $self = shift;
 	my $goto = shift;
 	my $curr = $self->_translateLinePos($goto);
 
-	if (!defined($curr)) {
-		$self->setError("Invalid line position: $goto");
+	if ( !defined($curr) ) {
+		$self->_setError("Invalid line position: $goto");
 		return undef;
 	}
 
-	$self->_debug("goto $goto succeeded from array pos " . $self->{_currline} . " to $curr");
+	$self->_debug(   "goto $goto succeeded from array pos "
+				   . $self->{_currline}
+				   . " to $curr" );
 	$self->{_currline} = $curr;
 	return $self->getLineNumber();
 }
 
 sub getLineCount {
 	my $self = shift;
-	return ($#{$self->{_buffer}}+1);
+	return ( $#{ $self->{_buffer} } + 1 );
 }
 
 sub getLineNumber {
 	my $self = shift;
-	$self->_debug("line is " . ($self->{_currline}+1) . ", array pos is $self->{_currline}");
-	return ($self->{_currline}+1);
+	$self->_debug(   "line is "
+				   . ( $self->{_currline} + 1 )
+				   . ", array pos is $self->{_currline}" );
+	return ( $self->{_currline} + 1 );
 }
 
 sub isEOF { return shift->isEndOfBuffer() }
+
 sub isEndOfBuffer {
 	my $self = shift;
-	return ($self->{_currline} >= $self->getLineCount());
+	return ( $self->{_currline} >= $self->getLineCount() );
 }
-sub isEmpty { return (shift->getLineCount() == 0) }
+sub isEmpty { return ( shift->getLineCount() == 0 ) }
 
-	
+sub isModified     { return shift->{_modified}; }
+sub _setModified   { my $self = shift; $self->{_modified}++; }
+sub _clearModified { my $self = shift; $self->{_modified} = 0; }
+
 sub next {
 	my $self = shift;
-	my $num = shift || 1;
+	my $num  = shift || 1;
+
 	#FIXME should return all lines as array in array context
-	if (!$self->goto("+$num")) {
+	if ( !$self->goto("+$num") ) {
 		return undef;
 	}
 	return $self->get();
@@ -177,9 +202,10 @@ sub next {
 
 sub previous {
 	my $self = shift;
-	my $num = shift || 1;
+	my $num  = shift || 1;
+
 	#FIXME should return all lines as array in array context
-	if (!$self->goto("-$num")) {
+	if ( !$self->goto("-$num") ) {
 		return undef;
 	}
 	return $self->get();
@@ -204,27 +230,38 @@ sub findPrevious {
 # Viewing/Editing methods
 #-------------------------------------------------------------
 sub get {
-	my $self = shift;
+	my $self    = shift;
 	my $linenum = shift;
-	if (defined($linenum)) { $linenum = $self->_translateLinePos($linenum) }
+	if ( defined($linenum) ) { $linenum = $self->_translateLinePos($linenum) }
 	else { $linenum = $self->{_currline} }
-	if (!defined($linenum)) {
-		$self->setError("Invalid line position");
+	if ( !defined($linenum) ) {
+		$self->_setError("Invalid line position");
 		return undef;
 	}
-	my $line = ${ $self->{_buffer} }[ $linenum ];
-	$self->_debug("get line $linenum in array: " . (defined($line) ? $line : "*undef*"));
+	my $line = ${ $self->{_buffer} }[$linenum];
+	$self->_debug( "get line $linenum in array: "
+				   . ( defined($line) ? $line : "*undef*" ) );
 	return $line;
 }
 
 sub set {
-	my $self = shift;
-	my $line = shift;
+	my $self    = shift;
+	my $line    = shift;
 	my $linenum = shift;
-	if (defined($linenum)) { $linenum = $self->translateLinePos($linenum) }
+	if ( defined($linenum) ) { $linenum = $self->translateLinePos($linenum) }
 	else { $linenum = $self->{_currline} }
-	$self->_debug("set line $linenum in array: " . (defined($line) ? $line : "*undef*"));	
-	${ $self->{_buffer} }[ $linenum ] = $line;
+	if ( !defined($line) ) {
+		$self->_setError("Cannot set undefined data for line $linenum");
+		return undef;
+	}
+	$self->_debug("set line $linenum in array: $line");
+	if ( !defined( ${ $self->{_buffer} }[$linenum] )
+		 || ${ $self->{_buffer} }[$linenum] ne $line )
+	{
+		$self->_setModified();
+	}
+
+	${ $self->{_buffer} }[$linenum] = $line;
 	return 1;
 }
 
@@ -249,7 +286,11 @@ sub delete {
 
 sub dumpAsString {
 	my $self = shift;
-	return join("",map { (defined($_) ? $_ : "*undef*") } @{ $self->{_buffer} }) if ($self->{_buffer}) && (ref($self->{_buffer}) eq "ARRAY") && $#{$self->{_buffer}} >= 0;
+	return
+	  join( "", map { ( defined($_) ? $_ : "*undef*" ) } @{ $self->{_buffer} } )
+	  if ( $self->{_buffer} )
+	  && ( ref( $self->{_buffer} ) eq "ARRAY" )
+	  && $#{ $self->{_buffer} } >= 0;
 	return "";
 }
 
@@ -258,12 +299,14 @@ sub replace {
 	my $match = shift;
 	my $with  = shift;
 	my $opts  = shift;
-	if (!defined($opts)) { $opts = "g"; }
+	if ( !defined($opts) ) { $opts = "g"; }
 	my $count;
 	my $str = $self->get();
 	return undef if !defined($str);
-	$self->_debug("Doing replacement of '$match' with '$with' (opts: $opts) on string: $str");
+	$self->_debug(
+"Doing replacement of '$match' with '$with' (opts: $opts) on string: $str" );
 	eval "\$count = (\$str =~ s/$match/$with/$opts)";
+
 	if ($count) {
 		$self->set($str);
 	}
@@ -274,17 +317,16 @@ sub replace {
 #-------------------------------------------------------------
 # ErrorHandling Methods
 #-------------------------------------------------------------
-sub addError { my $self = shift; $self->{error} .= shift; }
+sub _setError { my $self = shift; $self->{error} = shift; }
 sub isError { return ( shift->{'error'} ? 1 : 0 ); }
-sub setError { my $self = shift; $self->{error} = shift; }
 
 sub getError {
 	my $self  = shift;
 	my $error = $self->{error};
-	$self->clearError();
+	$self->_clearError();
 	return $error;
 }
-sub clearError { shift->{error} = ""; }
+sub _clearError { shift->{error} = ""; }
 
 #=============================================================
 # Private Methods
@@ -292,7 +334,7 @@ sub clearError { shift->{error} = ""; }
 # Only internal function for debug output
 sub _debug {
 	my $self = shift;
-	if ($#_ == -1) {
+	if ( $#_ == -1 ) {
 		return $self->{_debug};
 	}
 	elsif ( $self->{_debug} ) {
@@ -344,7 +386,7 @@ insert, append and replace).
 	$line =~ s/no/NO/g;
 	$text->set($line);
 
-=head2 Methods
+=head1 Methods
 
 =over 8
 
@@ -445,6 +487,15 @@ Adds the string to the top of the buffer.
 
 Same as B<insert>, but adds the string at the end of the buffer.
 
+=item replace
+
+	my $count = $text->replace("foo","bar");
+
+Replace the string/regex supplied as the first argument with the
+string from the second argument. Returns the number of occurences.
+The example above replaces any occurence of the string B<foo> with
+B<bar>.
+
 =item delete
 
 	$text->delete();
@@ -452,6 +503,36 @@ Same as B<insert>, but adds the string at the end of the buffer.
 
 Deletes the current editing line and gets the next line (which will have
 the same line number as the deleted now). 
+
+=item clear
+
+	$text->clear();
+
+Resets the buffer to be empty. No save is performed.
+
+=item getLineCount
+
+Returns the number of lines in the buffer. Returns 0 if buffer is empty.
+
+=item getLineNumber
+
+Returns the current line position in the buffer (always starting at 1).
+
+=item isModified
+
+Returns 1 if the buffer has been modified, by using any of the
+editing methods (replace, set, insert, append, ...)
+
+=item isEmpty
+
+Returns 1 if the buffer is currently empty.
+
+=item isEOF
+=item isEndOfBuffer
+
+	while (!$text->isEndOfBuffer()) { $text->next(); }
+
+Returns 1 if the current position is at the end of file.
 
 =item find
 
@@ -469,22 +550,34 @@ the next found line and 0 if no more lines are found.
 
 Repeats the search on the next line, search to the end of the buffer.
 
-=item findNext
+=item findPrevious
 
-	my $linenum = $text->findPreviou();
+	my $linenum = $text->findPrevious();
 
-Repeats the search on the previos line, searching to the top of the buffer.
+Repeats the search on the previous line, searching to the top of the buffer.
+
+=item isError
+=item getError
+
+	if ($text->isError()) { print "Error: " . $text->getError() . "\n"; }
+
+Simple error handling routines. B<isError> returns 1 if an internal error
+has been raised. B<getError> returns the textual error.
+
+=item dumpAsString
+
+	print $text->dumpAsString();
+
+Returns (dumps) the whole buffer as a string. Can be used to directly
+write to a file or postprocess manually.
 
 =back
 
 
 =head1 BUGS
 
-There definitly are some, if you find some, 
-If the command to be run does not exist (or not in the current
-execution path), it's quite possible that the B<new> method will not
-throw an exception.  It's up to the caller to make sure that the command
-will run!  There's no known workaround for this.
+There definitly are some, if you find some, please report them, by
+contacting the author.
 
 =head1 LICENSE
 

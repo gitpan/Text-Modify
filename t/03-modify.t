@@ -17,13 +17,13 @@ print "Using file: $input $output $tmpfile\n";
 my $text = new Text::Modify(file => $input, writeto => $tmpfile, dryrun => 0, backup => 0, debug => 1);
 isa_ok($text,"Text::Modify","Instantiate Text::Modify object");
 
-ok($text->replaceLine("sad","funny"),"add rule (simple)");
+ok($text->replace("sad","funny"),"add rule (simple)");
 Debug(2,"Error: $text->getError()") if $text->isError();
-ok($text->replaceLine("Multi","Muli"),"add rule (string multi)");
+ok($text->replace("Multi","Muli"),"add rule (string multi)");
 Debug(2,"Error: $text->getError()") if $text->isError();
-ok($text->replaceLine("^#.*remove.*",""),"add rule (regex simple)");
+ok($text->replace("^#.*remove.*",""),"add rule (regex simple)");
 Debug(2,"Error: $text->getError()") if $text->isError();
-ok($text->deleteLine('removed$'),"delete line rule");
+ok($text->delete('removed$'),"delete line rule");
 Debug(2,"Error: $text->getError()") if $text->isError();
 ok($text->defineRule(replace => '10.10.(\d+).100\s+(\w+)', with => '10.10.10.100	$2'),"add rule (regex with vars)");
 Debug(2,"Error: $text->getError()") if $text->isError();

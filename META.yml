@@ -1,10 +1,8 @@
-# http://module-build.sourceforge.net/META-spec.html
-#XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
-name:         Text-Modify
-version:      0.2
-version_from: lib/Text/Modify.pm
-installdirs:  site
-requires:
-
-distribution_type: module
-generated_by: ExtUtils::MakeMaker version 6.17
+--- #YAML:1.0
+name: Text-Modify
+version: 0.3
+author:
+  - Roland Lammel (lammel@cpan.org)
+abstract: oo-style interface for simple, rule-based text modification
+license: perl
+generated_by: Module::Build version 0.2608, without YAML.pm

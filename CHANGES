@@ -1,3 +1,11 @@
+Text-Modify	v0.3	(2005-03-02, +rl)
+- completed Text:Buffer, methods and pod
+- simplified Text::Modify::Rule and added pod
+- commented out unused methods in Text::Modify, wrote basic pod for it
+- improved tests and added pod-coverage to tests
+- added support for Module::Build (Build.PL), which builds the Makefile.PL now (traditional)
+- fixed license in README
+
 Text-Modify	v0.2	(2005-02-25, +rl)
 - completed navigation, set/get, replace functions of Text-Buffer
 - nearly completed tests for Text::Buffer (search/find missing)

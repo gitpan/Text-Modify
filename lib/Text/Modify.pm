@@ -15,7 +15,7 @@ use Text::Buffer;
 use vars qw($VERSION);
 
 BEGIN {
-	$VERSION="0.2";
+	$VERSION="0.3";
 }
 
 sub new {
@@ -44,7 +44,7 @@ sub new {
     }
     else { $self->{file} = shift; }
     $self->_debug("Created object $class as $self (" . ref($self) . ")");
-    $self->clearError();
+    $self->_clearError();
     $self->{ruleorder} = [];
     $self->{blockorder} = [];
     # Define the "ALL" block, which includes the whole file and is used
@@ -53,60 +53,61 @@ sub new {
     return $self;
 }
 
-sub defineBlock {
-	my $self = shift;
-	my $name = shift;
-	my %opts = @_;
-	if (exists($self->{block}->{$name})) {
-		$self->setError("Block $name already defined");
-		return 0;
-	}
-	if ($opts{fromline}) {
-		$self->{block}->{$name}->{from} = $opts{fromline};
-	} elsif ($opts{frommatch}) {
-		$self->{block}->{$name}->{frommatch} = $opts{frommatch};
-	} else {
-		$self->{block}->{$name}->{from} = 0;
-	}
-	if ($opts{toline}) {
-		$self->{block}->{$name}->{to} = $opts{toline};
-	} elsif ($opts{frommatch}) {
-		$self->{block}->{$name}->{tomatch} = $opts{tomatch};
-	} else {
-		$self->{block}->{$name}->{to} = 999999;
-	}
-	push @{$self->{blockorder}},$name;
-	return 1;
-}
-
-sub undefineBlock {
-	my $self = shift;
-	my $name = shift;
-	if (exists($self->{block}->{$name})) {
-		$self->_debug("Undefining block $name");
-		delete($self->{block}->{$name});
-		my @tmp = @{$self->{blockorder}};
-		@{$self->{blockorder}} = grep($_ ne $name, @tmp);    
-	} else {
-		$self->_debug("Block $name not defined, ignoring");
-	}
-	return 1;
-}
-
-sub listMatchBlocks {
-	my $self = shift;
-	return (grep { !defined($self->{block}->{$_}->{from}) || !defined($self->{block}->{$_}->{to}) } $self->listBlocks());
-}
-
-sub listCurrentBlocks {
-	my $self = shift;
-	return (grep { $self->{block}->{$_}->{active} } $self->listBlocks());
-}
-
-sub listBlocks {
-	my $self = shift;
-	return @{$self->{blockorder}};
-}
+# Block processing not implemented yet
+#sub defineBlock {
+#	my $self = shift;
+#	my $name = shift;
+#	my %opts = @_;
+#	if (exists($self->{block}->{$name})) {
+#		$self->_setError("Block $name already defined");
+#		return 0;
+#	}
+#	if ($opts{fromline}) {
+#		$self->{block}->{$name}->{from} = $opts{fromline};
+#	} elsif ($opts{frommatch}) {
+#		$self->{block}->{$name}->{frommatch} = $opts{frommatch};
+#	} else {
+#		$self->{block}->{$name}->{from} = 0;
+#	}
+#	if ($opts{toline}) {
+#		$self->{block}->{$name}->{to} = $opts{toline};
+#	} elsif ($opts{frommatch}) {
+#		$self->{block}->{$name}->{tomatch} = $opts{tomatch};
+#	} else {
+#		$self->{block}->{$name}->{to} = 999999;
+#	}
+#	push @{$self->{blockorder}},$name;
+#	return 1;
+#}
+#
+#sub undefineBlock {
+#	my $self = shift;
+#	my $name = shift;
+#	if (exists($self->{block}->{$name})) {
+#		$self->_debug("Undefining block $name");
+#		delete($self->{block}->{$name});
+#		my @tmp = @{$self->{blockorder}};
+#		@{$self->{blockorder}} = grep($_ ne $name, @tmp);    
+#	} else {
+#		$self->_debug("Block $name not defined, ignoring");
+#	}
+#	return 1;
+#}
+#
+#sub listMatchBlocks {
+#	my $self = shift;
+#	return (grep { !defined($self->{block}->{$_}->{from}) || !defined($self->{block}->{$_}->{to}) } $self->listBlocks());
+#}
+#
+#sub listCurrentBlocks {
+#	my $self = shift;
+#	return (grep { $self->{block}->{$_}->{active} } $self->listBlocks());
+#}
+#
+#sub listBlocks {
+#	my $self = shift;
+#	return @{$self->{blockorder}};
+#}
 
 ### TODO Need to define all methods and also options like
 ### TODO addIfMissing to add a required line even if it is not found at end/start of file or block
@@ -123,12 +124,12 @@ sub defineRule {
 	}
 	$self->_debug("Defining rule '$name': " . join(",",%opts));
 	if (!$opts{replace} && !$opts{insert} && !$opts{'delete'}) {
-		$self->addError("Failed to define rule $name");
+		$self->_addError("Failed to define rule $name");
 		return 0;
 	}
 	$self->{rule}->{$name} = new Text::Modify::Rule(%opts, debug => $self->{_debug});
 	if (!$self->{rule}->{$name}) {
-		$self->setError("Could not init rule $name");
+		$self->_setError("Could not init rule $name");
 		return 0;
 	}
 	push @{$self->{ruleorder}},$name;
@@ -149,20 +150,20 @@ sub undefineRule {
 	return 1;
 }
 
-# Simple syntax ->replaceLine("MY","HIS") or ->replaceLine("WHAT","WITH",ignorecase => 1) 
+# Simple syntax ->replace("MY","HIS") or ->replaceLine("WHAT","WITH",ignorecase => 1) 
 # supported options are: 
 # 	dryrun		do not apply changes
 #	ignorecase	ignore case for matching
 #	ifmissing 	insert/append/ignore/fail string if missing (cannot use results of regex then)
 # 	matchfirst	only match X times for replacing, 1 would only replace the first occurence
-sub replaceLine {
+sub replace {
 	my ($self,$what,$with,%opts) = @_;
 	$opts{replace} = $what;
 	$opts{with} = $with;
 	return $self->defineRule(%opts);
 }
 
-sub replaceInBlock { }
+# TODO sub replaceInBlock { }
 
 # Usage: Delete line matching expressions MATCH
 # Syntax: ->deleteLine("MATCH", ignorecase => 1, matchfirst => 1)
@@ -172,28 +173,29 @@ sub replaceInBlock { }
 #	ifmissing 	ignore|fail if missing
 # 	matchfirst	only match X times for replacing, 1 would only replace the first occurence
 
-sub deleteLine { 
+sub delete { 
 	my ($self,$what,%opts) = @_;
 	$opts{'delete'} = $what;
 	return $self->defineRule(%opts);
 }
-sub deleteInBlock { }
+# TODO sub deleteInBlock { }
 
-sub insertLine { 
+sub insert { 
 	my ($self,$what,%opts) = @_;
 	$opts{insert} = $what;
 	$opts{at} = "top";
 	return $self->defineRule(%opts);	
 }
-sub insertLineInBlock { }
+# TODO sub insertInBlock { }
 
-sub appendLine { 
+sub append { 
 	my ($self,$what,%opts) = @_;
 	$opts{insert} = $what;
 	$opts{at} = "bottom";
 	return $self->defineRule(%opts);	
 }
-sub appendLineInBlock { }
+
+# TODO sub appendInBlock { }
 
 
 sub listRules {
@@ -213,7 +215,7 @@ sub backupExtension {
 	return $self->{backupExt};
 }
 
-sub getBackupFilename {
+sub _getBackupFilename {
 	my $self = shift;
 	my $file = $self->{'file'} || shift;
 	my $bakfile = $file . $self->{'backupExt'};
@@ -236,7 +238,7 @@ sub getBackupFilename {
 sub createBackup {
 	my $self = shift;
 	my $file = $self->{'file'} || shift;
-	my $bakfile = $self->getBackupFilename();
+	my $bakfile = $self->_getBackupFilename();
 	### Create a backup if bakfile is set
 	if ($bakfile && $bakfile ne $file) {
 		$self->_debug("- Creating backup copy $bakfile");
@@ -245,9 +247,6 @@ sub createBackup {
 	}
 	return $bakfile;
 }
-
-
-
 
 sub _processLine {
 	my $self = shift;
@@ -278,57 +277,11 @@ sub _processLine {
 		if ($self->{tmpfh}->opened()) {
 			$self->{tmpfh}->print($out);
 		} else {
-			$self->setError("Cannot write to temp. file $self->{tmpname}");
+			$self->_setError("Cannot write to temp. file $self->{tmpname}");
 			return 0;
 		}
 	}
 	return $line;
-}
-
-sub _readFile {
-	my $self = shift;
-	my $file = $self->{'file'};
-	$self->{linesread} = 0;	
-	if (-r $file && open(IN,$file)) {
-		while (<IN>) {
-			# TODO Actually process the line and do the replacing
-			$self->{linesread}++;			
-			$self->_debug("Read line " . $self->{linesread} . ": $_");
-			push @{$self->{data}},$_;
-		}
-		close(IN);
-		if ($self->isError()) {
-			Error($self->getError());
-			return 0;
-		}
-	} else {
-		$self->setError("Cannot read from $file");
-		return 0;
-	}
-	return 1;
-}
-
-sub _writeFile {
-	my $self = shift;
-	my $file = $self->{'writeto'};
-	$self->{lineswritten} = 0;
-	# TODO maybe should move back processing here	
-	if (-w $file && open(OUT,">$file")) {
-		$self->_debug(3,"Writing to file $file");
-		foreach (@{$self->{data}}) {
-			$self->_debug("Writing: $_");
-			print OUT $_;
-			$self->{lineswritten}++;
-		}
-		if (!close(OUT)) {
-			$self->setError("Failed to close file after $self->{lineswritten} lines written");
-			return 0;
-		}
-	} else {
-		$self->setError("Cannot write file $file");
-		return 0;
-	}
-	return 1;
 }
 
 sub process {
@@ -365,15 +318,17 @@ sub process {
 	foreach ($self->listRules()) {
 		my $rule = $self->{rule}->{$_};
 		$self->_debug("Processing rule $_");
-		$rule->process($self->{_buffer});
-		$self->{replacecount} += $rule->getReplaceCount();
-		$self->{matchcount} += $rule->getMatchCount();
-		$self->{addcount} += $rule->getAddCount();
-		$self->{deletecount} += $rule->getDeleteCount();
+		my $changecount = $rule->process($self->{_buffer});
+		$self->{changecount} += $changecount;
+		my ($match, $add, $del, $repl) = $rule->getModificationStats();
+		$self->{replacecount} += $repl;
+		$self->{matchcount} += $match;
+		$self->{addcount} += $add;
+		$self->{deletecount} += $del;
 		$self->_debug("Stats rule $_ (change/match/repl/add/del): " . 
-			"$self->{lineschanged}/$self->{matchcount}/$self->{replacecount}/$self->{addcount}/$self->{deletecount}");
+			"$self->{lineschanged}/$match/$repl/$add/$del");
 		if ($rule->isError()) {
-			$self->addError($rule->getError());
+			$self->_addError($rule->getError());
 			last;
 		}
 	}
@@ -401,9 +356,10 @@ sub process {
 
 sub dryrun {
 	my $self = shift;
+	my $old = $self->{dryrun};
 	$self->{dryrun} = 1;
 	my $rc = $self->process();
-	$self->{dryrun} = 0;
+	$self->{dryrun} = $old;
 	return $rc;
 }
 
@@ -418,16 +374,16 @@ sub getDeleteCount    { return shift->{deletecount}; }
 #=============================================================
 # ErrorHandling Methods
 #=============================================================
-sub addError { my $self = shift; $self->{error} .= shift; }
+sub _addError { my $self = shift; $self->{error} .= shift; }
 sub isError { return (shift->{'error'} ? 1 : 0); }
-sub setError { my $self = shift; $self->{error} = shift; }
+sub _setError { my $self = shift; $self->{error} = shift; }
 sub getError {
 	my $self = shift;
 	my $error = $self->{error};
-	$self->clearError();
+	$self->_clearError();
 	return $error;
 }
-sub clearError { shift->{error} = ""; }
+sub _clearError { shift->{error} = ""; }
 
 #=============================================================
 # Private methods (for internal use )
@@ -436,9 +392,164 @@ sub clearError { shift->{error} = ""; }
 # Only internal function for debug output
 sub _debug {
 	my $self = shift;
-	if ($self->{_debug}) {
-		print "@_\n";
+	if ($#_ == -1) {
+		return $self->{_debug};
+	}
+	elsif ( $self->{_debug} ) {
+		print "[DEBUG] @_\n";
 	}
 }
 
 1;
+__END__
+
+=head1 NAME
+
+Text::Modify - oo-style interface for simple, rule-based text modification
+
+=head1 SYNOPSIS
+
+  use Text::Modify;
+
+  my $mod = new Text::Modify(-file=>'my.txt', -writeto=>'new.txt', dryrun=>0);
+  $mod->replace("sad","funny");
+  $mod->replace('.*?logalhos$',"127.0.0.1	localhost",ifmissing=>'append');
+  my $count = $mod->process();
+
+=head1 DESCRIPTION
+
+C<Text::Modify> is a simple oo-style interface to perform variuos 
+text modifcation tasks.
+
+Instead of having to parse and modify textfiles with customized
+routines over and over C<Text::Modify> provides a common ruleset, 
+which allows simple to advanced editing tasks to be performend.
+
+After instantiating a new C<Text::Modify> object, rules are defined
+on it and finally processed.
+
+	my $mod = new Text::Modify();
+
+C<Text::Modify> uses C<Text::Buffer> internally to perform the 
+editing tasks on the text-file.
+
+=head1 Methods
+
+=over 8
+
+=item new
+
+    $mod = new Text::Modify(%options);
+
+This creates a new object, starting with an empty buffer unless the
+B<-file> or B<-array> options are provided. The available
+attributes are:
+
+=item append
+
+	$mod->append("new last line");
+
+Add a rule to append a new line at enf of text.	
+	
+=item insert
+
+	$mod->insert("new first line");
+
+Add a rule to insert a new line at start of text.	
+
+=item delete
+
+	$mod->delete('.*DELETE ME$');
+
+Add a rule to delete lines matching the supplied string. The string is
+interpreted as a regular expression, so be sure to escape characters
+accordingly.
+
+=item replace
+
+	$mod->replace("foo","bar", ifmissing=>append, ignorecase=>1);
+
+Add a rule to replace all occurences of C<foo> with C<bar> in the text.	
+
+=item defineRule
+
+	$mod->defineRule(replace=>'foo\s+bar',with=>'foobar', ifmissing=>append);
+
+# TODO add pod for all options supported by defineRule()
+Advanced interface to define a rule, which gives most flexibilty
+to perform a given task the way you need it.
+
+=item undefineRule
+
+Delete a rule, that was created with the supplied name
+
+=item listRules
+
+Returns a list of rules in the order they will be executed.
+
+=item createBackup
+
+create a backup of the specified file
+
+=item backupExtension
+
+get/set the backup extension used for backup files
+
+=item getLinesModified
+=item getLinesProcessed
+=item getDeleteCount
+=item getAddCount
+=item getMatchCount
+=item getReplaceCount
+
+Return statistics and counters of the processing performed
+
+=item process
+
+	$mod->process();
+
+Start processing of the text, rule by rule. If dryrun is enabled, 
+modification will be performed in memory, but are B<not> written
+to file.
+
+=item dryrun
+
+	$mod->dryrun();
+
+Start processing of the text, rule by rule with dryrun enabled. 
+The setting for dryrun will be restored after processing.
+Modification will be performed in memory, but are B<not> written
+to file.
+
+=item isDryRun
+
+Returns 1 if dryrun has been enabled, no modifications will be written
+to the text to process. Otherwise returns 0.
+
+=item isError
+=item getError
+
+	if ($text->isError()) { print "Error: " . $text->getError() . "\n"; }
+
+Simple error handling routines. B<isError> returns 1 if an internal error
+has been raised. B<getError> returns the textual error.
+
+=back
+
+=head1 BUGS
+
+There definitly are some, if you find some, please report them.
+
+=head1 LICENSE
+
+This software is released under the same terms as perl itself. 
+You may find a copy of the GPL and the Artistic license at 
+
+   http://www.fsf.org/copyleft/gpl.html
+   http://www.perl.com/pub/a/language/misc/Artistic.html
+
+=head1 AUTHOR
+
+Roland Lammel (lammel@cpan.org)
+
+=cut
