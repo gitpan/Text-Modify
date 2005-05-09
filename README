@@ -24,12 +24,21 @@ DEPENDENCIES
     
 INSTALLATION
 
-    To compile, test and install Text::Modify
+    To compile, test and install use:
+    
+    perl Build.PL
+    ./Build.PL
+    ./Build.PL test
+    ./Build.PL install
+    
+	or the old method:
 
 	perl Makefile.PL
 	make
 	make test
 	make install
+	
+	Make sure the last step (install) is executed with the appropriate privileges.
 
 
 CHANGES
@@ -37,9 +46,19 @@ CHANGES
     See the CHANGES file for more details
 
 
+TODO / WISHLIST
+
+    Some ideas for improvements are:
+    - Allow wildcard search and replaces
+    - Better seperation of string and regex search and replaces
+    	(suggested by Terence Brannon)
+		e.g. $txt->replace( string => "foo", with => "bar")
+    - Using buffer and stringops like in emacs (suggested by Terence Brannon)
+
+
 COPYRIGHT
 
-	Copyright (C) 2004, 2005 by Roland Lammel <rl@brabbel.net>.
+	Copyright (C) 2004, 2005 by Roland Lammel <lammel@cpan.org>.
 
 	All rights reserved.  You can redistribute and/or modify
 	this bundle under the same terms as Perl itself.
@@ -50,4 +69,4 @@ COPYRIGHT
 
 AUTHOR
 
-    Roland Lammel (rl AT brabbel.net)
+    Roland Lammel (lammel@cpan.org)

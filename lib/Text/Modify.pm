@@ -1,6 +1,6 @@
 package Text::Modify;
 #================================================================
-# (C)2004, rl AT brabbel.net
+# (C)2004-2005, lammel@cpan.org
 #================================================================
 # - Multiline replace is NOT supported currently
 # - only simple regex and string replacement probably works the
@@ -15,7 +15,7 @@ use Text::Buffer;
 use vars qw($VERSION);
 
 BEGIN {
-	$VERSION="0.3";
+	$VERSION="0.4";
 }
 
 sub new {
@@ -43,6 +43,7 @@ sub new {
     	if ($self->{writeto}) { $self->{backup} = 0; }
     }
     else { $self->{file} = shift; }
+    if (!$self->{writeto} && $self->{file}) { $self->{writeto} = $self->{file}}
     $self->_debug("Created object $class as $self (" . ref($self) . ")");
     $self->_clearError();
     $self->{ruleorder} = [];
@@ -122,6 +123,7 @@ sub defineRule {
 	if (!$name) {
 		$name = "rule" . ($#{$self->{ruleorder}}+1);
 	}
+	return 0 if (!%opts);
 	$self->_debug("Defining rule '$name': " . join(",",%opts));
 	if (!$opts{replace} && !$opts{insert} && !$opts{'delete'}) {
 		$self->_addError("Failed to define rule $name");
@@ -157,10 +159,26 @@ sub undefineRule {
 #	ifmissing 	insert/append/ignore/fail string if missing (cannot use results of regex then)
 # 	matchfirst	only match X times for replacing, 1 would only replace the first occurence
 sub replace {
+	my $self = shift;
+	return $self->replaceRegex(@_);
+}
+
+sub replaceString {
 	my ($self,$what,$with,%opts) = @_;
-	$opts{replace} = $what;
-	$opts{with} = $with;
-	return $self->defineRule(%opts);
+	$self->_debug("Adding string replace rule: '$what' with '$with'");
+	return $self->defineRule(replace=>$what,type=>'string',string=>$what,with=>$with,%opts);
+}
+
+sub replaceWildcard {
+	my ($self,$what,$with,%opts) = @_;
+	$self->_debug("Adding wildcard replace rule: '$what' with '$with'");
+	return $self->defineRule(replace=>$what,type=>'wildcard',wildcard=>$what,with=>$with,%opts);
+}
+
+sub replaceRegex {
+	my ($self,$what,$with,%opts) = @_;
+	$self->_debug("Adding regex replace rule: '$what' with '$with'");
+	return $self->defineRule(replace=>$what,type=>'regex',regex=>$what,with=>$with,%opts);
 }
 
 # TODO sub replaceInBlock { }
@@ -248,42 +266,6 @@ sub createBackup {
 	return $bakfile;
 }
 
-sub _processLine {
-	my $self = shift;
-	my $line = shift;
-	# TODO Do the actual processing, block detection and replacing
-	my $changed = 0;
-	my $out = $line;
-	foreach my $rulekey (keys %{$self->{'rule'}}) {
-		my $string = undef;
-		my $rule = $self->{'rule'}->{$rulekey};
-		$self->_debug("Processing rule $rulekey (" . ref($rule) . ")");
-		if ($rule) {
-			$string = $rule->process($out);
-		}
-		$self->_debug("Line before(<<<)/after(>>>):\n<<<$line>>>" . ($string || "undef"));
-		if (defined($string)) {
-			$self->{replacecount} += $rule->getReplaceCount();
-			$self->{matchcount}   += $rule->getMatchCount();
-			if ($string ne $line) {
-				$changed = 1;
-				$out = $string;
-			}
-		}
-	
-	}
-	if ($changed) { $self->{lineschanged}++ }
-	if (!$self->{dryrun}) {
-		if ($self->{tmpfh}->opened()) {
-			$self->{tmpfh}->print($out);
-		} else {
-			$self->_setError("Cannot write to temp. file $self->{tmpname}");
-			return 0;
-		}
-	}
-	return $line;
-}
-
 sub process {
 	my $self = shift;
 	my $file = $self->{'file'};
@@ -300,12 +282,6 @@ sub process {
 	$self->{linesread} = $txtbuf->getLineCount();
 	$self->{_buffer} = $txtbuf;
 	$self->_debug("Read $self->{linesread} from $file");
-
-# TODO Need this for processing of large files	
-#	if (!$self->{writeto}) {
-#		($self->{tmpfh},$self->{tmpname}) = tempfile();
-#		$self->_debug(2,"Using temp. file: $self->{tmpname}");
-#	}
 
 	$self->{replacecount} = 0;
 	$self->{matchcount} = 0;
@@ -338,11 +314,14 @@ sub process {
 	
 	### Now mv the temp. file to overwrite the original configfile
 	if (!$self->{dryrun}) {
+		# Force saving now
+		$self->{_buffer}->setModified();
 		if (!$self->{_buffer}->save($self->{writeto})) {
+			$self->_debug("Error saving file to " . $self->{writeto});
 			return 0;
 		}
 	} else {
-		$self->_debug("Dryrun, not writing file")
+		$self->_debug("Dryrun, not writing file");
 	}
 	$self->_debug("Statistics:
 	Lines read: 	$self->{linesread}   
@@ -370,6 +349,7 @@ sub getReplaceCount   { return shift->{replacecount}; }
 sub getMatchCount     { return shift->{matchcount}; }
 sub getAddCount       { return shift->{addcount}; }
 sub getDeleteCount    { return shift->{deletecount}; }
+
 
 #=============================================================
 # ErrorHandling Methods
@@ -471,6 +451,29 @@ accordingly.
 
 Add a rule to replace all occurences of C<foo> with C<bar> in the text.	
 
+=item replaceString
+
+	$mod->replaceString("foo","bar", ifmissing=>append, ignorecase=>1);
+
+Add a rule to replace all occurences of string C<foo> with C<bar> in the text.	
+
+=item replaceWildcard
+
+	$mod->replace("*foo?","bar", ifmissing=>append, ignorecase=>1);
+
+Add a rule to replace all occurences matching the wildcard C<*foo?> with
+C<bar> in the text.	'*' (asterisk) will match any characters (as much as
+possible) and '?' (question mark) will match one character
+
+=item replaceRegex
+
+	$mod->replace("\s*foo\d+","bar", ifmissing=>append);
+	$mod->replace("\s*foo(\d+)",'bar$1', ignorecase=>1);
+
+Add a rule to replace all occurences matching the regular expression 
+C<*foo?> with C<bar> in the text. Also regex parameters can be used in
+the replacement string.
+
 =item defineRule
 
 	$mod->defineRule(replace=>'foo\s+bar',with=>'foobar', ifmissing=>append);
@@ -527,6 +530,7 @@ Returns 1 if dryrun has been enabled, no modifications will be written
 to the text to process. Otherwise returns 0.
 
 =item isError
+
 =item getError
 
 	if ($text->isError()) { print "Error: " . $text->getError() . "\n"; }

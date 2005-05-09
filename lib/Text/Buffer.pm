@@ -1,28 +1,32 @@
 package Text::Buffer;
 
 use strict;
-use vars qw($VERSION);
+use vars qw($VERSION $DEBUG);
 
 use Carp;
 
 BEGIN {
-	$VERSION = '0.3';
+	$VERSION = '0.4';
+	$DEBUG = 1;
 }
 
 sub new {
 	my $proto = shift;
 	my $class = ref($proto) || $proto;
 	my $self = {
-				 _debug    => 1,
+				 _debug    => 0,
 				 _buffer   => [],
 				 _currline => 0,
-				 _modified => 0
+				 _modified => 0,
+				 _autonewline => "unix",
+				 _newline  => "\n"
 	};
 
 	bless( $self, $class );
-	$self->_debug("Instantiated new object $class");
 
 	my %opts = @_;
+	if ($opts{debug}) { $self->{_debug} = $opts{debug}}
+	$self->_debug("Instantiated new object $class");
 	if ( $opts{file} ) {
 		$self->{file} = $opts{file};
 		$self->load();
@@ -33,7 +37,10 @@ sub new {
 				$self->append($_);
 			}
 		}
-		$self->_setModified(1);
+		$self->setModified(1);
+	}
+	foreach (qw(autonewline)) {
+		$self->{"_$_"} = $opts{$_} if exists($opts{$_});
 	}
 
 	return $self;
@@ -72,7 +79,7 @@ sub save {
 		return undef;
 	}
 
-	if ( !$self->isModified() ) {
+	if ( $self->{file} && $file eq $self->{file} && !$self->isModified() ) {
 		$self->_debug("Buffer not modified, not saving to file $file");
 		return 1;
 	}
@@ -87,6 +94,7 @@ sub save {
 		my $str = $self->get();
 		my $cnt = 0;
 		while ( defined($str) ) {
+			$self->_debug("saving: '$str'");
 			$cnt++;
 			print FIL $str;
 			$str = $self->next();
@@ -186,8 +194,34 @@ sub isEndOfBuffer {
 sub isEmpty { return ( shift->getLineCount() == 0 ) }
 
 sub isModified     { return shift->{_modified}; }
-sub _setModified   { my $self = shift; $self->{_modified}++; }
-sub _clearModified { my $self = shift; $self->{_modified} = 0; }
+sub setModified    { my $self = shift; $self->_debug("Marking buffer modified"); $self->{_modified} = 1; }
+sub _clearModified { my $self = shift; $self->_debug("Marking buffer unmodified"); $self->{_modified} = 0; }
+
+sub setAutoNewline {
+	my $self = shift;
+	my $newline = shift;
+	if (!$newline || $newline eq "off" || $newline eq "none") { 
+		$self->{_autonewline} = ""; $self->{_newline} = "";
+	}
+	elsif ($newline eq "\n" || lc($newline) eq "unix") {
+		$self->{_autonewline} = "unix"; $self->{_newline} = "\n";
+	}
+	elsif ($newline eq "\r" || lc($newline) eq "mac") {
+		$self->{_autonewline} = "mac"; $self->{_newline} = "\r";
+	}
+	elsif ($newline eq "\r\n" || lc($newline) eq "windows") {
+		$self->{_autonewline} = "windows"; $self->{_newline} = "\r\n";
+	}
+	else {
+		$self->{_autonewline} = "other"; $self->{_newline} = "$newline";
+	}
+	return 1;
+}
+
+sub getAutoNewline {
+	my $self = shift;
+	return $self->{_newline};
+}
 
 sub next {
 	my $self = shift;
@@ -215,10 +249,46 @@ sub previous {
 # Searching methods
 #-------------------------------------------------------------
 sub find {
-	return undef;
+	my $self = shift;
+	my $match = shift || return undef;
+	# TODO Add a more sophisticated interface, like 
+	# find(regex => "\d+", startat => 'top', wrap => 1)
+	my $wrap = shift;
+	$match = $self->escapeRegexString($match);
+	$self->{_findstart} = 1;	# Start at top, unless startline is defined
+	$self->{_findlast}  = undef;
+	$self->{_findregex} = $match;
+	$self->{_findwrap}  = $wrap;
+	$self->goto($self->{_findstart});
+	return $self->findNext();
 }
 
 sub findNext {
+	my $self = shift;
+	my $match = $self->{_findregex};
+	return undef if !$match;
+	# Continue from current-line + 1 (avoid matchloop)
+	if (defined($self->{_findlast})) { $self->goto($self->{_findlast} + 1); }
+	my $line = $self->get();
+	my $MAXCOUNT = $self->getLineCount(); 
+	my $count = 0;
+	while (defined($line) && $count++ <= $MAXCOUNT) {
+		$self->_debug("Finding $match in line: '$line'");
+		if ($line =~ /$match/) {
+			if (defined($self->{_findlast}) && $self->{_currline} eq $self->{_findlast}) {
+				$self->_debug("Ohoh, should not have found same match again");
+				return undef;
+			}
+			$self->{_findlast} = $self->getLineNumber();
+			$self->_debug("Found match $match in line $self->{_findlast}");
+			return $self->getLineNumber();
+		}
+		$line = $self->next();
+		if ($self->isEOF() && $self->{_findwrap}) {
+			$self->goto('top');
+			$line = $self->get();
+		}
+	}
 	return undef;
 }
 
@@ -238,7 +308,7 @@ sub get {
 		$self->_setError("Invalid line position");
 		return undef;
 	}
-	my $line = ${ $self->{_buffer} }[$linenum];
+	my $line = $self->_appendAutoNewline(${ $self->{_buffer} }[$linenum]);
 	$self->_debug( "get line $linenum in array: "
 				   . ( defined($line) ? $line : "*undef*" ) );
 	return $line;
@@ -258,7 +328,7 @@ sub set {
 	if ( !defined( ${ $self->{_buffer} }[$linenum] )
 		 || ${ $self->{_buffer} }[$linenum] ne $line )
 	{
-		$self->_setModified();
+		$self->setModified();
 	}
 
 	${ $self->{_buffer} }[$linenum] = $line;
@@ -294,7 +364,46 @@ sub dumpAsString {
 	return "";
 }
 
-sub replace {
+sub replaceString {
+	my $self  = shift;
+	my ($match,$with) = @_;
+	my $str = $self->get();
+	return undef if !defined($str);
+	$self->_debug( "Doing string replacement of '$match' with '$with' on string: $str" );
+	my $pos = 0;
+	my $index = 0;
+	my $count = 0;
+	my $MAXCOUNT = 1000;
+	while ($pos < length($str) && ($index = index($str,$match,$pos)) >= $pos && $count++ < $MAXCOUNT) {
+		# myfoobar, foo is at index 2, foo is replaced by bar, 
+		$self->_debug("Found $match at $index (pos was $pos)");
+		$str = substr($str,0,$index) . $with . substr($str,$index + length($match));
+		$pos = $index + length($with);
+		$self->_debug("String is now $str, pos is $pos");
+	}
+	if ($count == $MAXCOUNT) { $self->setError("Maximum loopcount reached"); return undef; }
+	if ($count) {
+		$self->set($str);
+	}
+	return $count;
+}
+
+sub replaceWildcard {
+	my $self  = shift;
+	my ($match,$with,$opts) = @_;
+	# Replace wildcards with apropriate regex terms
+	# map '*' to '.*?'
+	# map '?' to '.'
+	# leave other things the same, but escape / and ()
+	$self->_debug("Doing wildcard replacement of '$match' with '$with'" );
+	$match = $self->escapeRegexString($match,"*.");
+	$match =~ s/\?/./g;
+	$match =~ s/\*/\\S*/g;
+	$self->_debug("After wildcard expansion: $match (was $_[1])");
+	return $self->replaceRegex($match, $with, $opts);
+}
+
+sub replaceRegex {
 	my $self  = shift;
 	my $match = shift;
 	my $with  = shift;
@@ -303,15 +412,56 @@ sub replace {
 	my $count;
 	my $str = $self->get();
 	return undef if !defined($str);
+	# Be sure to escape our used seperation char for s//
+	$with =~ s?(^|[^\\])/?$1\\/?g;
 	$self->_debug(
-"Doing replacement of '$match' with '$with' (opts: $opts) on string: $str" );
+"Doing regex replacement of '$match' with '$with' (opts: $opts) on string: $str" );
 	eval "\$count = (\$str =~ s/$match/$with/$opts)";
 
 	if ($count) {
 		$self->set($str);
 	}
-
 	return $count;
+}
+
+# replace is an alias for replaceRegex
+sub replace { shift->replaceRegex(@_); }
+
+#=============================================================
+# Utility functions / class methods
+#=============================================================
+sub convertWildcardToRegex {
+	my $self = shift;
+	my $string = shift || return "";
+	$self->_debug("convert wildcard '$string'");
+	$string = $self->escapeRegexString($string,"?*");
+	$string =~ s/\?/./g;
+	$string =~ s/\*/.*/g;
+#	$string =~ s/([\(\)\/])/\\$1/g;
+	$self->_debug("converted to regex: $string");
+	return $string;
+}
+
+sub escapeRegexString {
+	# We need to escape all regex specific chars
+	# ignore chars will not be escaped
+	my $self = shift;
+	my $string = shift || return "";
+	my $ignorechars = shift || "";
+	my $regexchars = '\\/()[]{}+.*?'; #'
+	my $escapechars = "";
+	$self->_debug("escape string: '$string'   ignoring: '$ignorechars'  regex: '$regexchars'\n");
+	# Build a hash of chars to ignore and
+	my %chars = (map { $_ => 1 } split(//,$ignorechars));
+	# Now remove all unused ignored chars
+	foreach (split(//,$regexchars)) { $escapechars .= '\\' . $_ if !$chars{$_} }
+	$string =~ s/([$escapechars])/\\$1/g;
+	$self->_debug("escape: '$escapechars', string: '$string'");
+	return $string;
+}
+
+sub convertStringToRegex {
+	return shift->escapeRegexString(@_);
 }
 
 #-------------------------------------------------------------
@@ -332,13 +482,36 @@ sub _clearError { shift->{error} = ""; }
 # Private Methods
 #=============================================================
 # Only internal function for debug output
+sub _appendAutoNewline {
+	my $self = shift;
+	my $text = shift;
+	return $text if (!$self->{_autonewline} || !$text);
+	my $newline = $self->{_newline} || "";
+	$text =~ s/[\r\n]+$//;
+	$self->_debug("appended autonewline " . $self->{_autonewline}. "'$newline' to '$text'");
+	return "$text$newline";
+}
+
+sub _debuglevel {
+	my $self = shift;
+	my $level = shift;
+	if (ref($self) eq __PACKAGE__) {
+		if (defined($level)) { $self->{_debug} = $level; }
+		$level = $self->{_debug};
+#		print "Object debug is $level (" . ref($self) . ")\n";
+	} else {
+		if (defined($level)) { $DEBUG = $level; }
+		$level = $DEBUG;
+#		print "Class debug is $level (" . ref($self) . ")\n";
+	}
+	return $level;
+}
+
 sub _debug {
 	my $self = shift;
-	if ( $#_ == -1 ) {
-		return $self->{_debug};
-	}
-	elsif ( $self->{_debug} ) {
-		print "[DEBUG] @_\n";
+	my $lvl = $self->_debuglevel();
+	if ( $self->_debuglevel() ) {
+		print "[DEBUG$lvl] @_\n";
 	}
 }
 
@@ -416,9 +589,22 @@ expressions, it should be an array reference.  For example,
     array => \@test
     array => ['first line','second line']
 
-# TODO Handling of line endings can be altered with the autoNewLine option.
+=item autonewline [unix | mac | windows | SPECIAL]
+
+With this option the automatic appending (and replacement) of line-endings
+can be altered. E.g. if unix is defined, all lines (upon read) will be
+altered to end with \n.
 
 =back
+
+=item setAutoNewline 
+
+Set the automatic line-end character(s). See option autonewline for
+possible values.
+
+=item getAutoNewline
+
+Get the current newline character(s) set. E.g. return "\n" for type unix.
 
 =item load
 
@@ -471,13 +657,13 @@ Same as B<next>, but in the other editing direction (to start of buffer).
 	
 Get the current line from the buffer.
 
-=item set
+=item set ($string)
 
     $text->set("Replace with this text");
 	
 Replace the current line in the buffer with the supplied text.
 
-=item insert
+=item insert ($string)
 
     $text->insert("top of the flops");
 
@@ -495,6 +681,45 @@ Replace the string/regex supplied as the first argument with the
 string from the second argument. Returns the number of occurences.
 The example above replaces any occurence of the string B<foo> with
 B<bar>.
+
+=item replaceString
+
+	my $count = $text->replaceString(".foo$","bar");
+
+Replace the a literal string supplied as the first argument with the
+string from the second argument. No regex escapes are required, 
+the string will be used as provided (e.g. dot is a dot).
+Returns the number of occurences replaced.
+
+The example above replaces any occurence of the string B<.foo$> with
+B<bar>.
+
+=item replaceRegex
+
+	my $count = $text->replaceRegex("foo\s+foo","bar");
+
+Replace the regex supplied as the first argument with the
+string from the second argument. Returns the number of occurences.
+
+For the replacement string match variables (e.g. $1) can be used
+for replacement.
+
+The example above replaces any occurence of the string B<foo  foo> with
+B<bar>.
+
+=item replaceWildcard
+
+	my $count = $text->replaceWildcard("*foo?","bar");
+
+Replace a wildcard string as the first argument with the string
+from the second argument. Wildcard B<*> (asterisk, meaning match all 
+characters) and B<?> (questionmark, meaning match one character)
+will be expanded and the expanded string replaced with the
+replacement string provided as the second argument.
+Returns the number of occurences replaced.
+
+The example above replaces any occurence of the string B<abcfoo2>
+(as regex /^.*?foo./) with B<bar>.
 
 =item delete
 
@@ -523,11 +748,17 @@ Returns the current line position in the buffer (always starting at 1).
 Returns 1 if the buffer has been modified, by using any of the
 editing methods (replace, set, insert, append, ...)
 
+=item setModified
+
+Manually set the buffer to be modified, which will force the next save, even 
+if no changes have been performed on the buffer.
+
 =item isEmpty
 
 Returns 1 if the buffer is currently empty.
 
 =item isEOF
+
 =item isEndOfBuffer
 
 	while (!$text->isEndOfBuffer()) { $text->next(); }
@@ -542,8 +773,6 @@ Search for the supplied string/regex in the buffer (starting at top of
 buffer). Even if 2 matches are found in the same line, find always returns
 the next found line and 0 if no more lines are found.
 
-# TODO Implement search wrapping
-
 =item findNext
 
 	my $linenum = $text->findNext();
@@ -556,7 +785,38 @@ Repeats the search on the next line, search to the end of the buffer.
 
 Repeats the search on the previous line, searching to the top of the buffer.
 
+=item convertStringToRegex
+
+	$text->convertStringToRegex("No * have ?");
+	Text::Modify->convertStringToRegex("a brace (is a brace)?");
+
+Helper function to convert a string into a regular expression matching
+the same string (espacing chars). The regex string returned matches
+the strings as provided.
+
+This function can be called as a class method too.
+
+=item convertWildcardToRegex
+
+	$text->convertWildcardToRegex("we need ?? beers");
+	Text::Modify->convertWildcardToRegex("foo? or more *bar");
+
+Helper function to convert a wildcard string into a regular expression
+matching the wildcard (having whitespace as a word boundary).
+
+This function can be called as a class method too.
+
+=item escapeRegexString
+
+	Text::Modify->escapeRegexString();
+
+Helper function to escape regex special chars and treat them as normal 
+characters for matchin.
+
+This function can be called as a class method too.
+
 =item isError
+
 =item getError
 
 	if ($text->isError()) { print "Error: " . $text->getError() . "\n"; }
@@ -572,7 +832,6 @@ Returns (dumps) the whole buffer as a string. Can be used to directly
 write to a file or postprocess manually.
 
 =back
-
 
 =head1 BUGS
 

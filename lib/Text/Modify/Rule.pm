@@ -7,9 +7,10 @@ package Text::Modify::Rule;
 
 use strict;
 use vars qw($VERSION);
+use Text::Buffer;
 
 BEGIN {
-	$VERSION="0.3";
+	$VERSION="0.4";
 }
 
 #====================================================
@@ -40,12 +41,23 @@ sub new {
 
 		if ( defined( $opts{with} ) ) {
 			$self->{type}  = 'replace';
-			$self->{regex} = $opts{replace};
-
+			# TODO need to distinguish between string, wildcard, regex here
+			$self->{replacetype} = $opts{type} || "regex";
+			if ($self->{replacetype} eq "wildcard") {
+				$self->{regex} = Text::Buffer->convertWildcardToRegex($opts{replace});
+			}
+			elsif ($self->{replacetype} eq "string") {
+				$self->{regex} = Text::Buffer->convertStringToRegex($opts{replace});
+			} else {
+				$self->{regex} = $opts{replace};
+			}
 			# Set available options
-			foreach (qw(replace with dryrun ignorecase matchfirst ifmissing)) {
+			foreach (qw(replace string wildcard with dryrun ignorecase matchfirst ifmissing)) {
 				$self->{$_} = $opts{$_} if ( defined( $opts{$_} ) );
 			}
+			$self->{with} =~ s?(^|[^\\])/?$1\\/?g;
+			$self->_debug(sprintf("after escape: type=%s regex='%s' with='%s' (orig='%s')", $self->{replacetype}, $self->{regex}, $self->{with}, $opts{replace}));
+			
 
 			# Create the regex options from params
 			$self->{opts} .= ( $self->{ignorecase} ? "i" : "" );
@@ -55,6 +67,7 @@ sub new {
 		if ( defined( $opts{at} ) ) {
 			$self->{type}  = 'insert';
 			$self->{regex} = "";
+			$self->{with} = $opts{insert};
 
 			# Set available options
 			foreach (qw(insert at dryrun ignorecase ifmissing)) {
@@ -112,8 +125,9 @@ sub process {
 	my @appendblock;
 
 	# Start processing
-	$self->_debug( "processing rule of type $self->{type} with match ",
-				   $self->{regex} );
+	$self->_debug( "processing rule of type $self->{type}, regex is " . 
+		(defined($self->{regex}) ? $self->{regex} : "undef" ) . 
+		", with is " . (defined($self->{with}) ? $self->{with} : "undef" ));
 	my $i   = 0;
 	my $abs = 0;
 	my ( $match, $opts ) = ( $self->{regex}, $self->{opts} );
@@ -122,71 +136,75 @@ sub process {
 	$txt->goto('top');
 	my $string = $txt->get();
 
-	while ( defined($string) ) {
-		$abs++;
-		if ( $self->{matchcount} >= $self->{matchfirst} ) {
-			$self->_debug( "First matches reached, ignoring rest for this rule" );
-			last;
-		}
-		eval "\$found = (\$string =~ /$match/$opts);";
-		$self->_debug( "Eval: \$found = ('$string' =~ /$match/$opts) = $found" );
-		if ($found) {
-			$self->{matchcount}++;
-
-			# TODO complete all functionality here (replace,insert,delete,move)
-			$self->_debug(  "Found match on line $abs (rel $i): $string" );
-			if ( $self->{type} eq "delete" ) {
-				$self->{deletecount}++;
-
-				# Should be deleted from array
-				$self->_debug(  "deleting line" );
-				$txt->delete();
+	if ($self->{type} ne "insert") {
+		while ( defined($string) ) {
+			$abs++;
+			if ( $self->{matchcount} >= $self->{matchfirst} ) {
+				$self->_debug( "First matches reached, ignoring rest for this rule" );
+				last;
 			}
-			elsif ( $self->{type} eq "move" ) {
-
-				# Should be deleted from array
-				$self->{addcount}++;
-				$self->{deletecount}++;
-				$self->_debug(  "moving line" );
-				if ( $self->{to} eq "top" ) {
-					$txt->insert($string);
+			eval "\$found = (\$string =~ /$match/$opts);";
+			$self->_debug( "Eval: \$found = ('$string' =~ /$match/$opts) = $found" );
+			if ($found) {
+				$self->{matchcount}++;
+	
+				# TODO complete all functionality here (replace,insert,delete,move)
+				$self->_debug(  "Found match on line $abs (rel $i): $string" );
+				if ( $self->{type} eq "delete" ) {
+					$self->{deletecount}++;
+	
+					# Should be deleted from array
+					$self->_debug(  "deleting line" );
+					$txt->delete();
+					$string = $txt->get();
+					next;
+				}
+				elsif ( $self->{type} eq "move" ) {
+	
+					# Should be deleted from array
+					$self->{addcount}++;
+					$self->{deletecount}++;
+					$self->_debug(  "moving line" );
+					if ( $self->{to} eq "top" ) {
+						$txt->insert($string);
+					}
+					else {
+						$txt->append($string);
+					}
+					$txt->delete();
+					$string = $txt->get();
+					next;
+				}
+				elsif ( $self->{type} eq "replace" ) {
+					$self->_debug(  "replacing with $self->{'with'}" );
+					my $tmp = $string;
+					eval "\$tmp =~ s/$match/$self->{with}/g$opts";
+					if ( $tmp ne $string ) {
+						$self->{replacecount}++;
+					}
+					$txt->set($tmp);
 				}
 				else {
-					$txt->append($string);
+					$self->_setError("not processed by any rule");
+					return 0;
 				}
-				$txt->delete();
 			}
-			elsif ( $self->{type} eq "replace" ) {
-				$self->_debug(  "replacing with $self->{'with'}" );
-				my $tmp = $string;
-				eval "\$tmp =~ s/$match/$self->{with}/g$opts";
-				if ( $tmp ne $string ) {
-					$self->{replacecount}++;
-				}
-				$txt->set($tmp);
-			}
-			else {
-				$self->_setError("not processed by any rule");
-				return 0;
-			}
+			$string = $txt->next();
 		}
-		$string = $txt->next();
 	}
 
 	if ( $self->{type} eq "insert" ) {
 
 		# Should be deleted from array
-		$self->_debug( "insert line" );
 		$self->{addcount}++;
-		if ( $self->{ifmissing} eq "insert" ) {
-			$self->_debug( "inserting missing line" );
+		if ( $self->{at} eq "insert" ) {
+			$self->_debug( "inserting line:" . $self->{with});
 			$txt->insert( $self->{with} );
 		}
 		else {
-			$self->_debug( "appending missing line" );
+			$self->_debug( "appending line" . $self->{with} );
 			$txt->append( $self->{with} );
 		}
-		next;
 	}
 
 	# process missing elements
@@ -293,6 +311,7 @@ Returns to number of matches found, lines added, lines deleted and
 the number of replacements performed.
 
 =item isError
+
 =item getError
 
 	if ($rule->isError()) { print "Error: " . $rule->getError() . "\n"; }
