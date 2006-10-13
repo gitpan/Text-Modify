@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name: Text-Modify
-version: 0.4.1
+version: 0.5
 author:
   - Roland Lammel (lammel@cpan.org)
 abstract: oo-style interface for simple, rule-based text modification

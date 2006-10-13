@@ -15,7 +15,7 @@ use Text::Buffer;
 use vars qw($VERSION);
 
 BEGIN {
-	$VERSION="0.4.1";
+	$VERSION="0.5";
 }
 
 sub new {
