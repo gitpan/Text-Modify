@@ -2,10 +2,10 @@
 use ExtUtils::MakeMaker;
 WriteMakefile
 (
-          'PL_FILES' => {},
-          'INSTALLDIRS' => 'site',
           'NAME' => 'Text::Modify',
           'VERSION_FROM' => 'lib/Text/Modify.pm',
-          'PREREQ_PM' => {}
+          'PREREQ_PM' => {},
+          'INSTALLDIRS' => 'site',
+          'PL_FILES' => {}
         )
 ;

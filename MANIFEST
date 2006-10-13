@@ -1,5 +1,6 @@
 Build.PL
 CHANGES
+examples/change_ip.pl
 lib/Text/Buffer.pm
 lib/Text/Modify.pm
 lib/Text/Modify/Rule.pm
@@ -12,4 +13,5 @@ t/02-buffer.t
 t/03-modify.in
 t/03-modify.out
 t/03-modify.t
+t/99-pod-coverage.t
 t/99-pod.t
